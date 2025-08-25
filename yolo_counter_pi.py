@@ -1,156 +1,104 @@
-# detecting people that enter and exiting from librarys in the Technion.
-
-import os
-import ast
-import logging
-logging.getLogger("tensorflow").setLevel(logging.ERROR)
-
-# Import the Picamera2 and time libraries
+import cv2
 from picamera2 import Picamera2
 import time
+from ultralytics import YOLO
+from collections import defaultdict
 
-def run():
-    '''
-    Initialize counter class and run counting loop.
-    '''
-    import sys
-    import cv2
+# --- Initial Settings (★★★★★ ADJUST THESE VALUES FOR YOUR ENVIRONMENT ★★★★★) ---
+# 1. Video Resolution
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
 
-    from util.logger import get_logger
-    from FrameProcessor import FrameProcessor
-    from util.debugger import mouse_callback, take_screenshot
-    from keras import backend as K
-    logger = get_logger()
+# 2. Counting Line (Y-coordinate)
+# Set this line somewhere in the middle of the frame to detect crossing.
+LINE_Y_POSITION = 240
+# --------------------------------------------------------------------
 
-    # IGNORE WARNINGS:
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-    # ### Picamera2 Initialization (Modified Section) ###
-    FRAME_WIDTH = 1280 # You may need to adjust this to a resolution your camera supports
-    FRAME_HEIGHT = 720 # You may need to adjust this to a resolution your camera supports
-    
+def main():
+    # 1. Initialize Picamera2
     picam2 = Picamera2()
     config = picam2.create_preview_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"})
     picam2.configure(config)
     picam2.start()
     time.sleep(1) # Wait for the camera to stabilize
-    print("Picamera2 started successfully.")
+
+    # 2. Load the YOLO model
+    model = YOLO('yolov8n.pt')
+    print("YOLO model loaded. Starting person counting.")
+
+    # 3. Initialize variables
+    # A dictionary to store the tracking history of objects
+    track_history = defaultdict(lambda: [])
     
-    # Get the first frame to set width and height variables
-    frame = picam2.capture_array()
-    f_height, f_width, _ = frame.shape
-    
-    # ####load configuration from the env file#####
-    # ##detection configuration###
-    detection_slowdown = ast.literal_eval(os.getenv('DETECTION_SLOWDOWN'))
-    detection_interval = int(os.getenv('DI'))
-    mcdf = int(os.getenv('MCDF'))
-    detector = os.getenv('DETECTOR')
+    # Counter variables
+    in_count = 0
+    out_count = 0
 
-    # create detection region of interest polygon#
-    use_droi = ast.literal_eval(os.getenv('USE_DROI'))
-    droi = ast.literal_eval(os.getenv('DROI')) \
-            if use_droi \
-            else [(0, 0), (f_width, 0), (f_width, f_height), (0, f_height)]
-    show_droi = ast.literal_eval(os.getenv('SHOW_DROI'))
-
-    # confidence threshold of detection#
-    confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD"))
-    
-    # ( ... rest of the configuration is the same as the original code ... )
-    sensitive_confidence_threshold = float(os.getenv("SENSITIVE_CONFIDENCE_THRESHOLD"))
-    mctf = int(os.getenv('MCTF'))
-    tracker = os.getenv('TRACKER')
-    duplicate_object_threshold = float(os.getenv('OVERLAP_THRESHOLD'))
-    use_counting_roi = ast.literal_eval(os.getenv('USE_COUNT_ROI'))
-    counting_roi = ast.literal_eval(os.getenv('COUNTING_ROI')) if use_counting_roi else None
-    show_roi_counting = ast.literal_eval(os.getenv('SHOW_COUNT_ROI'))
-    counting_roi_outside = ast.literal_eval(os.getenv('COUNTING_ROI_OUTSIDE'))
-    counting_line_orientation = os.getenv('COUNTING_LINE_ORIENTATION')
-    counting_line_position = float(os.getenv('COUNTING_LINE_POSITION'))
-    use_object_liveness = ast.literal_eval(os.getenv('ENABLE_OBJECT_LIVENESS'))
-    roi_object_liveness = ast.literal_eval(os.getenv('OBJECT_LIVENESS_ROI')) if use_object_liveness else None
-    show_object_liveness = ast.literal_eval(os.getenv('SHOW_OBJECT_LIVENESS'))
-    frame_number_counting_color = int(os.getenv('COLOR_CHANGE_INTERVAL_FOR_COUNTING_LINE'))
-    event_api_url = os.getenv('EVENT_API_URL')
-
-    # ##output configuration###
-    record = ast.literal_eval(os.getenv('RECORD'))
-    UI = ast.literal_eval(os.getenv('UI'))
-    debug = ast.literal_eval(os.getenv('DEBUG'))
-    # ####### create people counter object ########
-    people_counter = FrameProcessor(frame, tracker, droi, show_droi, mcdf,
-                                     mctf, detection_interval, counting_line_orientation, counting_line_position,
-                                   show_roi_counting, counting_roi, counting_roi_outside, frame_number_counting_color,
-                                   detection_slowdown, roi_object_liveness, show_object_liveness, confidence_threshold, sensitive_confidence_threshold,
-                                   duplicate_object_threshold, event_api_url)
-
-    # ( ... video writer setup is the same as original ... )
-    if record:
-        output_name ="output.avi"
-        output_video = cv2.VideoWriter(os.getenv('OUTPUT_VIDEO_PATH') + output_name,
-                                       cv2.VideoWriter_fourcc(*'MJPG'),
-                                        30, (f_width, f_height))
-
-    logger.info('Processing started.')
-    
-    cv2.namedWindow('Debug')
-    cv2.setMouseCallback('Debug', mouse_callback, {'frame_width': f_width, 'frame_height': f_height})
-
-    is_paused = False
-    output_frame = None
-    start_time = time.time()
-
-    # ##########main loop ###############
-    # The while loop condition is changed to True for a continuous camera stream
     while True:
-        if debug:
-            k = cv2.waitKey(1) & 0xFF
-            if k == ord('p'):
-                is_paused = not is_paused
-            if k == ord('s') and output_frame is not None:
-                take_screenshot(output_frame)
-            if k == ord('q'):
-                logger.info('Loop stopped.', extra={'meta': {'cat': 'COUNT_PROCESS'}})
-                break
-
-        if is_paused:
-            time.sleep(0.5)
-            continue
-        
-        # ### Read frame from Picamera2 (Modified Section) ###
+        # 4. Capture a frame from the camera
         frame = picam2.capture_array()
+
+        # 5. Perform object tracking, BUT ONLY FOR 'PERSON' CLASS
+        # The 'classes=0' argument tells YOLO to only detect and track objects of class 0, which is 'person'.
+        # This is the key change to solve the problem.
+        results = model.track(frame, persist=True, verbose=False, classes=0)
+
+        # Draw the bounding boxes and tracking IDs on the frame.
+        # Since 'results' now only contains people, this will only draw boxes for people.
+        annotated_frame = results[0].plot()
+
+        # Check if any people are being tracked
+        if results[0].boxes.id is not None:
+            # 6. Get tracking data for the detected people
+            boxes = results[0].boxes.xywh.cpu()  # Bounding boxes in (x, y, width, height)
+            track_ids = results[0].boxes.id.int().cpu().tolist()
+
+            # 7. Iterate over each tracked person
+            for box, track_id in zip(boxes, track_ids):
+                x, y, w, h = box
+                center_x = int(x)
+                center_y = int(y)
+
+                # Append the person's center point to their tracking history
+                track = track_history[track_id]
+                track.append((center_x, center_y))
+                # Keep the track history to a manageable length
+                if len(track) > 30:
+                    track.pop(0)
+
+                # 8. Check if the person has crossed the counting line
+                # We need at least two points in the track to determine direction.
+                if len(track) > 1:
+                    prev_y = track[-2][1]  # The y-coordinate from the previous frame
+                    
+                    # Crossing from top to bottom (counts as 'In')
+                    if prev_y < LINE_Y_POSITION and center_y >= LINE_Y_POSITION:
+                        in_count += 1
+                        track_history[track_id] = [] # Reset track to prevent double counting
+                    
+                    # Crossing from bottom to top (counts as 'Out')
+                    elif prev_y > LINE_Y_POSITION and center_y <= LINE_Y_POSITION:
+                        out_count += 1
+                        track_history[track_id] = [] # Reset track to prevent double counting
         
-        # count people and show it in the video
-        people_counter.track_and_detect(frame)
-        output_frame = people_counter.visualize()
+        # Draw the counting line on the frame
+        cv2.line(annotated_frame, (0, LINE_Y_POSITION), (FRAME_WIDTH, LINE_Y_POSITION), (0, 0, 255), 2)
+        
+        # Display the count information on the frame
+        info_text = f"In: {in_count} / Out: {out_count}"
+        cv2.putText(annotated_frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        if record:
-             output_video.write(output_frame)
+        # Display the resulting frame
+        cv2.imshow("YOLO People Counter", annotated_frame)
 
-        if UI:
-             debug_window_size = ast.literal_eval(os.getenv('DEBUG_WINDOW_SIZE'))
-             resized_frame = cv2.resize(output_frame, debug_window_size)
-             cv2.imshow('Debug', resized_frame)
+        # Press 'q' to exit the loop
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-    end_time = time.time()
-    total_time = str(end_time-start_time)
-    print("total time = " + total_time)
-    print("total in : {0} \n total out {1}\n".format(str(people_counter.person_count_in), str(people_counter.person_count_out)))
-    
-    # ### Cleanup process (Modified Section) ###
-    picam2.stop() # Stop the camera
-    if UI:
-        cv2.destroyAllWindows()
-    if record:
-        output_video.release()
-    K.clear_session()
-    return people_counter.person_count_in, people_counter.person_count_out, total_time, people_counter.count_order
+    # Cleanup on exit
+    picam2.stop()
+    cv2.destroyAllWindows()
+    print(f"Final Count -> In: {in_count}, Out: {out_count}")
 
-# (The rest of the file is the same as the original)
-if __name__ == '__main__':
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path="./env.env")
-    from util.logger import init_logger
-    init_logger()
-    run()
+if __name__ == "__main__":
+    main()
