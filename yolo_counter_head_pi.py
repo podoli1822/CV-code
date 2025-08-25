@@ -31,11 +31,11 @@ def load_head_detection_model():
     # 1. Go to roboflow.com and create a free account.
     # 2. Go to Settings -> Roboflow API and copy your private API key.
     # IMPORTANT: Do not share your API key publicly.
-    rf = Roboflow(api_key="8cbxdULVHp2sex4Ml9Yd") # <--- PASTE YOUR KEY HERE
+    rf = Roboflow(api_key="8cbxdULVHp2sex4Ml9Yd")
     
     # This is a public model for head detection
-    project = rf.workspace("mohamed-soliman-g255g").project("head-detection-s09o2")
-    model = project.version(4).model
+    project = rf.workspace("roboflow-jvuqo").project("head-detection-r1do1")
+    model = project.version(2).model
     
     print("Head detection model loaded successfully.")
     return model
