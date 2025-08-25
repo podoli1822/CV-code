@@ -5,7 +5,7 @@ import ast
 import logging
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
-# Picamera2와 time 라이브러리를 import 합니다.
+# Import the Picamera2 and time libraries
 from picamera2 import Picamera2
 import time
 
@@ -25,23 +25,23 @@ def run():
     # IGNORE WARNINGS:
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-    # ### Picamera2 초기화 부분 (수정됨) ###
-    FRAME_WIDTH = 1280 # 카메라가 지원하는 해상도로 설정 필요
-    FRAME_HEIGHT = 720 # 카메라가 지원하는 해상도로 설정 필요
+    # ### Picamera2 Initialization (Modified Section) ###
+    FRAME_WIDTH = 1280 # You may need to adjust this to a resolution your camera supports
+    FRAME_HEIGHT = 720 # You may need to adjust this to a resolution your camera supports
     
     picam2 = Picamera2()
     config = picam2.create_preview_configuration(main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"})
     picam2.configure(config)
     picam2.start()
-    time.sleep(1) # 카메라 안정화 대기
+    time.sleep(1) # Wait for the camera to stabilize
     print("Picamera2 started successfully.")
     
-    # 첫 프레임을 가져와서 너비와 높이 설정
+    # Get the first frame to set width and height variables
     frame = picam2.capture_array()
     f_height, f_width, _ = frame.shape
     
     # ####load configuration from the env file#####
-    # ##detection configuratio###
+    # ##detection configuration###
     detection_slowdown = ast.literal_eval(os.getenv('DETECTION_SLOWDOWN'))
     detection_interval = int(os.getenv('DI'))
     mcdf = int(os.getenv('MCDF'))
@@ -57,7 +57,7 @@ def run():
     # confidence threshold of detection#
     confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD"))
     
-    # (이하 원본 코드와 동일 ... )
+    # ( ... rest of the configuration is the same as the original code ... )
     sensitive_confidence_threshold = float(os.getenv("SENSITIVE_CONFIDENCE_THRESHOLD"))
     mctf = int(os.getenv('MCTF'))
     tracker = os.getenv('TRACKER')
@@ -78,14 +78,14 @@ def run():
     record = ast.literal_eval(os.getenv('RECORD'))
     UI = ast.literal_eval(os.getenv('UI'))
     debug = ast.literal_eval(os.getenv('DEBUG'))
-    # ####### create people counter obejct ########
+    # ####### create people counter object ########
     people_counter = FrameProcessor(frame, tracker, droi, show_droi, mcdf,
                                      mctf, detection_interval, counting_line_orientation, counting_line_position,
                                    show_roi_counting, counting_roi, counting_roi_outside, frame_number_counting_color,
                                    detection_slowdown, roi_object_liveness, show_object_liveness, confidence_threshold, sensitive_confidence_threshold,
                                    duplicate_object_threshold, event_api_url)
 
-    # ( ... 원본 코드와 동일 ...)
+    # ( ... video writer setup is the same as original ... )
     if record:
         output_name ="output.avi"
         output_video = cv2.VideoWriter(os.getenv('OUTPUT_VIDEO_PATH') + output_name,
@@ -102,7 +102,7 @@ def run():
     start_time = time.time()
 
     # ##########main loop ###############
-    # while 루프 조건은 항상 참(True)으로 변경하여 계속 실행되도록 함
+    # The while loop condition is changed to True for a continuous camera stream
     while True:
         if debug:
             k = cv2.waitKey(1) & 0xFF
@@ -118,7 +118,7 @@ def run():
             time.sleep(0.5)
             continue
         
-        # ### Picamera2로부터 프레임 읽기 (수정됨) ###
+        # ### Read frame from Picamera2 (Modified Section) ###
         frame = picam2.capture_array()
         
         # count people and show it in the video
@@ -138,8 +138,8 @@ def run():
     print("total time = " + total_time)
     print("total in : {0} \n total out {1}\n".format(str(people_counter.person_count_in), str(people_counter.person_count_out)))
     
-    # ### 종료 처리 (수정됨) ###
-    picam2.stop() # 카메라 정지
+    # ### Cleanup process (Modified Section) ###
+    picam2.stop() # Stop the camera
     if UI:
         cv2.destroyAllWindows()
     if record:
@@ -147,7 +147,7 @@ def run():
     K.clear_session()
     return people_counter.person_count_in, people_counter.person_count_out, total_time, people_counter.count_order
 
-# (이하 원본 코드와 동일)
+# (The rest of the file is the same as the original)
 if __name__ == '__main__':
     from dotenv import load_dotenv
     load_dotenv(dotenv_path="./env.env")
